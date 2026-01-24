@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Sparkles, Copy, RefreshCw, Check, Wand2 } from 'lucide-react';
+import { Sparkles, Copy, RefreshCw, Check, Wand2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -9,8 +9,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { generateContent, ContentType, Platform, getTopicFromPrompt } from '@/lib/contentGenerator';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+
+type ContentType = 'caption' | 'story' | 'post' | 'vlog' | 'reel' | 'video-idea';
+type Platform = 'instagram' | 'youtube' | 'linkedin' | 'x' | 'facebook';
 
 const contentTypes: { value: ContentType; label: string; icon: string }[] = [
   { value: 'caption', label: 'Caption', icon: '📝' },
@@ -29,33 +32,16 @@ const platforms: { value: Platform; label: string; icon: string }[] = [
   { value: 'facebook', label: 'Facebook', icon: '👍' },
 ];
 
-const topicLabels: Record<string, { label: string; color: string }> = {
-  car: { label: '🚗 Automotive', color: 'bg-red-100 text-red-700' },
-  food: { label: '🍕 Food & Dining', color: 'bg-orange-100 text-orange-700' },
-  travel: { label: '✈️ Travel', color: 'bg-blue-100 text-blue-700' },
-  fashion: { label: '👗 Fashion', color: 'bg-pink-100 text-pink-700' },
-  fitness: { label: '💪 Fitness', color: 'bg-green-100 text-green-700' },
-  tech: { label: '💻 Technology', color: 'bg-purple-100 text-purple-700' },
-  nature: { label: '🌿 Nature', color: 'bg-emerald-100 text-emerald-700' },
-  music: { label: '🎵 Music', color: 'bg-indigo-100 text-indigo-700' },
-  pets: { label: '🐾 Pets', color: 'bg-amber-100 text-amber-700' },
-  business: { label: '💼 Business', color: 'bg-slate-100 text-slate-700' },
-  celebration: { label: '🎉 Celebration', color: 'bg-rose-100 text-rose-700' },
-  lifestyle: { label: '☀️ Lifestyle', color: 'bg-cyan-100 text-cyan-700' },
-  general: { label: '✨ General', color: 'bg-gray-100 text-gray-700' },
-};
-
 export function ContentGenerator() {
   const [prompt, setPrompt] = useState('');
   const [contentType, setContentType] = useState<ContentType>('caption');
   const [platform, setPlatform] = useState<Platform>('instagram');
   const [generatedContent, setGeneratedContent] = useState('');
-  const [detectedTopic, setDetectedTopic] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!prompt.trim()) {
       toast({
         title: 'Please enter a prompt',
@@ -66,15 +52,38 @@ export function ContentGenerator() {
     }
 
     setIsGenerating(true);
-    
-    // Simulate AI generation delay
-    setTimeout(() => {
-      const topic = getTopicFromPrompt(prompt);
-      setDetectedTopic(topic);
-      const content = generateContent(prompt, contentType, platform);
-      setGeneratedContent(content);
+    setGeneratedContent('');
+
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-content', {
+        body: { prompt: prompt.trim(), contentType, platform },
+      });
+
+      if (error) {
+        throw new Error(error.message || 'Failed to generate content');
+      }
+
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      if (data?.content) {
+        setGeneratedContent(data.content);
+        toast({
+          title: 'Content generated!',
+          description: 'Your AI-powered content is ready.',
+        });
+      }
+    } catch (error) {
+      console.error('Generation error:', error);
+      toast({
+        title: 'Generation failed',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
       setIsGenerating(false);
-    }, 800);
+    }
   };
 
   const handleCopy = async () => {
@@ -101,8 +110,8 @@ export function ContentGenerator() {
               <Wand2 className="w-5 h-5 text-primary-foreground" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-foreground">Content Generator</h2>
-              <p className="text-sm text-muted-foreground">Describe your idea and we'll create the perfect content</p>
+              <h2 className="text-lg font-semibold text-foreground">AI Content Generator</h2>
+              <p className="text-sm text-muted-foreground">Powered by advanced AI models</p>
             </div>
           </div>
 
@@ -167,7 +176,7 @@ export function ContentGenerator() {
                 >
                   {isGenerating ? (
                     <>
-                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       Generating...
                     </>
                   ) : (
@@ -182,17 +191,33 @@ export function ContentGenerator() {
           </div>
         </div>
 
-        {/* Output Section */}
-        {generatedContent && (
-          <div className="border-t border-border/50 bg-muted/20 p-6 sm:p-8 animate-fade-in">
-            {/* Topic Badge */}
-            {detectedTopic && (
-              <div className="mb-4">
-                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${topicLabels[detectedTopic]?.color || topicLabels.general.color}`}>
-                  {topicLabels[detectedTopic]?.label || topicLabels.general.label}
-                </span>
+        {/* Loading State */}
+        {isGenerating && !generatedContent && (
+          <div className="border-t border-border/50 bg-muted/20 p-8 animate-fade-in">
+            <div className="flex flex-col items-center justify-center gap-4">
+              <div className="relative">
+                <div className="w-16 h-16 rounded-2xl gradient-bg flex items-center justify-center animate-pulse">
+                  <Sparkles className="w-8 h-8 text-primary-foreground" />
+                </div>
               </div>
-            )}
+              <div className="text-center">
+                <p className="font-medium text-foreground">AI is crafting your content...</p>
+                <p className="text-sm text-muted-foreground">This usually takes a few seconds</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Output Section */}
+        {generatedContent && !isGenerating && (
+          <div className="border-t border-border/50 bg-muted/20 p-6 sm:p-8 animate-fade-in">
+            {/* AI Badge */}
+            <div className="mb-4">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary">
+                <Sparkles className="w-3 h-3" />
+                AI Generated
+              </span>
+            </div>
 
             {/* Generated Content */}
             <div className="bg-card rounded-xl border border-border/50 p-4 sm:p-6 mb-4">
